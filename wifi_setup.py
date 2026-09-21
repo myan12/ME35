@@ -5,8 +5,8 @@ import time
  
 #setting up SSID and password 
  
-SSID = "tufts_eecs" #use tufts_eecs
-PASSWORD = "foundedin1883" #foundedin1883
+SSID = "Tufts_Wireless" #use tufts_eecs
+PASSWORD = "" #foundedin1883
 
 
 #function definition 
