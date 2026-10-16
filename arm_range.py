@@ -1,20 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ---------------- Parameters ----------------
-L1 = 91.3          # mm, link on the 180 servo
-L2 = 40.0          # mm, geared link
-SERVO1_RANGE = (0, 180)     # deg, servo 1 command range
-SERVO2_RANGE = (0, 180)     # deg, servo 2 command range (before gearing)
-GEAR_RATIO = 2.0            # joint deg per servo deg (2:1 -> 180 servo gives 360)
-THETA1_OFFSET = 0           # deg, angle of link 1 when servo 1 reads 0
-THETA2_OFFSET = 0           # deg, angle of link 2 (relative to link 1) when servo 2 reads 0
-N = 400                     # samples per joint (higher = smoother)
-# --------------------------------------------
+# parameters
+L1 = 91.3       
+L2 = 40.0        
+SERVO1_RANGE = (0, 180)    
+SERVO2_RANGE = (0, 180)     
+GEAR_RATIO = 2.0            # for servo 2
+THETA1_OFFSET = 0           
+THETA2_OFFSET = 0           
+N = 400                    
 
-
+# finds positions that respond to servo angle values
 def forward_kinematics(s1_deg, s2_deg):
-    """Servo command angles (deg) -> elbow and end-effector positions (mm)."""
     t1 = np.radians(s1_deg + THETA1_OFFSET)
     t2 = np.radians(s2_deg * GEAR_RATIO + THETA2_OFFSET)   # gearing applied here
     ex, ey = L1 * np.cos(t1), L1 * np.sin(t1)
@@ -32,6 +30,7 @@ def compute_workspace():
 
 
 def main():
+    # visualization of arm range
     S1, S2, X, Y = compute_workspace()
     R = np.hypot(X, Y)
 
