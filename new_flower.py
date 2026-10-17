@@ -9,23 +9,24 @@ LED_PIN = 27
 MIN_PULSE_US = 500      
 MAX_PULSE_US = 2500    
 
-L1 = 91.3          	      
+L1 = 91.3            
 L2 = 40.0                
 GEAR_RATIO = 2.0
 
-THETA1_OFFSET = 180      # deg, link 1 angle when servo 1 = 0 (180 = pointing left)
-SERVO1_DIR = 1           # servo 1 increasing swings link 1 left -> down -> right (as observed)
-THETA2_OFFSET = 0        # deg, link 2 angle RELATIVE to link 1 when servo 2 = 0 (0 = in line)
-SERVO2_DIR = -1          # as observed: servo2=45 turns link 2 90 deg to the left (link 1 down)
-ELBOW_SIGN = 1           # elbow branch; must match arm_workspace.py
+THETA1_OFFSET = 180     
+SERVO1_DIR = 1          
+THETA2_OFFSET = 0    
+SERVO2_DIR = -1        
+ELBOW_SIGN = 1        
 SERVO1_RANGE = (0, 180)
 SERVO2_RANGE = (0, 180)
 
-STEP_MM = 1.0            # max straight-line distance per small step
-STEP_DELAY_MS = 20       # pause per step (bigger = slower, smoother)
+STEP_MM = 1.0           
+STEP_DELAY_MS = 20  
 SETTLE_MS = 300          # extra wait after a travel move before the LED turns on
 START_DELAY_S = 2        # time to get ready (e.g. open camera shutter)
 
+# set of points that correspond to flower shape based on given arm range
 POINTS = [
     (101.28, -10.09, 0),
     (102.92, -5.49, 1),
@@ -107,8 +108,8 @@ POINTS = [
     (89.00, -17.00, 1),
 ]
 
+# uses inverse kinematics to find the angles that correspond to the (x,y) positions of the flower
 def inverse_kinematics(x, y):
-    """(x, y) mm -> (servo1_deg, servo2_deg). Raises ValueError if unreachable."""
     c2 = (x * x + y * y - L1 * L1 - L2 * L2) / (2 * L1 * L2)
     if c2 < -1 or c2 > 1:
         raise ValueError("(%.1f, %.1f) is out of reach" % (x, y))
@@ -116,13 +117,14 @@ def inverse_kinematics(x, y):
     t1 = math.atan2(y, x) - math.atan2(L2 * math.sin(t2), L1 + L2 * math.cos(t2))
     s1 = (SERVO1_DIR * (math.degrees(t1) - THETA1_OFFSET)) % 360
     s2 = ((SERVO2_DIR * (math.degrees(t2) - THETA2_OFFSET)) % 360) / GEAR_RATIO
+    # raises error if out of range of arm
     if not (SERVO1_RANGE[0] <= s1 <= SERVO1_RANGE[1]) or \
        not (SERVO2_RANGE[0] <= s2 <= SERVO2_RANGE[1]):
         raise ValueError("(%.1f, %.1f) needs servo angles %.1f, %.1f (out of range)"
                          % (x, y, s1, s2))
     return s1, s2
 
-
+# servo initialization class
 class Servo:
     def __init__(self, pin):
         self.pwm = PWM(Pin(pin), freq=50)          # 50 Hz -> 20 ms period
@@ -145,9 +147,8 @@ def set_led(on):
     if led is not None:
         led.value(1 if on else 0)
 
-
+# moves servo from position (x0, y0) to (x1, y1) using inverse kinematics
 def move_to(x0, y0, x1, y1):
-    """Move in a straight line from (x0, y0) to (x1, y1) in small IK steps."""
     dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
     n = max(1, int(math.ceil(dist / STEP_MM)))
     for i in range(1, n + 1):
@@ -157,9 +158,9 @@ def move_to(x0, y0, x1, y1):
         servo2.write(s2)
         time.sleep_ms(STEP_DELAY_MS)
 
-
+# trace (x,y) points, interpolating every mm to move in a straight line
+# confirms the arm can reach all the points before moving any servos
 def check_points(points):
-    """Check every point (and the steps between them) before anything moves."""
     prev = None
     for p in points:
         if prev is not None:
@@ -177,7 +178,7 @@ def run(points):
     check_points(points)                  # raises before moving if anything is unreachable
     set_led(False)
 
-    # Go to the first point with the LED off
+    # go to first point with led off
     x, y = points[0][0], points[0][1]
     s1, s2 = inverse_kinematics(x, y)
     print("start  (%6.2f, %6.2f) -> servo1 %5.1f, servo2 %5.1f" % (x, y, s1, s2))
@@ -203,11 +204,10 @@ def run(points):
 
 
 def direction_name(deg):
-    """Absolute angle (CCW from +x) -> compass-style word."""
     names = ["RIGHT", "up-right", "UP", "up-left", "LEFT", "down-left", "DOWN", "down-right"]
     return names[int(((deg % 360) + 22.5) // 45) % 8]
 
-
+# calibration test to ensure that the arm is facing the right direction for (0,0)
 def calibrate():
     for s1, s2 in [(0, 0), (90, 0), (90, 45)]:
         a1 = THETA1_OFFSET + SERVO1_DIR * s1                    # link 1 absolute angle
@@ -218,8 +218,8 @@ def calibrate():
         servo2.write(s2)
         time.sleep(4)
 
-
-CALIBRATE = False        # True = run the pose check instead of drawing
+# runs pose check when set to true instead of inverse kinematics sequence
+CALIBRATE = False      
 
 try:
     if CALIBRATE:
