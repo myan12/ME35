@@ -4,15 +4,18 @@ import espnow
 from machine import Pin, PWM, I2C
 from neopixel import NeoPixel
 
-TEAM = "T1"             
-DEBUG = True                
+# ======================= SETTINGS =======================
+TEAM = "T1"                   # must match TEAM in station.py
+DEBUG = True                  # print sensor values (use this to tune thresholds)
 
-LEFT_SDA, LEFT_SCL = 21, 22  
-RIGHT_SDA, RIGHT_SCL = 26, 25
+# Sensors: VEML6040 has a fixed I2C address (0x10), so each gets its own bus.
+LEFT_SDA, LEFT_SCL = 21, 22   # I2C bus 0
+RIGHT_SDA, RIGHT_SCL = 26, 25 # I2C bus 1 = Grove port 3 (verify with an I2C scan)
 
-LEFT_MOTOR = (12, 13)         
-RIGHT_MOTOR = (14, 27)        
-LEFT_TRIM = 1.0               
+# Motors (swap INVERT if a wheel spins backwards)
+LEFT_MOTOR = (12, 13)         # M1A, M1B
+RIGHT_MOTOR = (14, 27)        # M2A, M2B
+LEFT_TRIM = 1.0               # speed multiplier per wheel to correct a drift (e.g. 0.95)
 RIGHT_TRIM = 1.0
 LEFT_INVERT = False
 RIGHT_INVERT = True
@@ -21,38 +24,45 @@ BUZZER_PIN = 23
 NEOPIXEL_PIN = 15
 BTN_CAL = Pin(34, Pin.IN)
 BTN_GO = Pin(35, Pin.IN)
-PRESSED = 0                   
+PRESSED = 0                   # buttons read 0 when pressed (flip to 1 if yours are opposite)
 
-SERVO_PIN = 4                 
-FLAG_REST = 0               
-FLAG_LOW, FLAG_HIGH = 45, 135 
-FLAG_WAVES = 4               
-FLAG_STEP_MS = 250           
+SERVO_PIN = 4                 # flag servo on D4
+FLAG_REST = 0                 # angle when the flag is down (TUNE)
+FLAG_LOW, FLAG_HIGH = 45, 135 # the wave swings between these two angles
+FLAG_WAVES = 4                # how many back-and-forth waves
+FLAG_STEP_MS = 250            # time per swing (lower = faster waving)
 
-# driving settings
+# Station (second ESP32) - ESP-NOW
+STATION_MAC = b'\x20\x50\x0d\x29\x93\x8c'
+ACK_TRIES = 3                 # how many times to send before giving up
+ACK_WAIT_MS = 300             # how long to wait for the ACK after each send
+
+# driving settings (speeds are percent, 0-100)
 BASE_SPEED = 25
 KP = 55.0                     # steering strength
 KD = 45.0                     # damping (reduces wobble)
 SEARCH_SPEED = 40
-FRONT_SENSOR = "left"         
-FRONT_DELAY_LOOPS = 4
+FRONT_SENSOR = "left"         # which sensor is mounted further forward ("left", "right", or None if level)
+FRONT_DELAY_LOOPS = 4         # loops to delay the front sensor (~25 ms each). TUNE: more if corners still fail
 # sweep used for when robot gets lost, up to 4 sweeps, where the angle gets wider for each turn
-SWEEP_MS = 400                
-SWEEP_MAX_STEPS = 4           
-                             
-SWEEP_FIRST = 1           
-LOST_THRESH = 0.15            
+SWEEP_MS = 400                # when the line is lost: the first sweep lasts this long (TUNE ~ a 90 degree pivot)
+SWEEP_MAX_STEPS = 4           # each sweep is longer than the last (1x, 2x, 3x... SWEEP_MS), up to this many x.
+                              # Bigger = wider search. 4 reaches about 2 x SWEEP_MS's angle on each side.
+SWEEP_FIRST = 1               # which way the search sweeps first: 1 = left, -1 = right
+LOST_THRESH = 0.15            # both sensors lighter than this = line lost
 
-# for white/black: brightness (W) only 
+# for white/black: brightness (W) only
 # saturation threshold, max color distance and dark cutoff come from training_data.csv
 # always match the training
 KNN_K = 5                     # number of nearest samples that vote
 KNN_EVERY = 1                 # run KNN every N loops (use 2 if the loop feels slow)
 # color accepted with 3 votes; a stray reading (patch border, glare) is simply outvoted
 CONFIRM_SPEED = 12            # slows down when color detected for more samples
-CONFIRM_WINDOW_MS = 400       
-CONFIRM_VOTES = 3             
-COOLDOWN_MS = 2500       # ignore colors after successfully detected     
+CONFIRM_WINDOW_MS = 400       # how long to look before giving up
+CONFIRM_VOTES = 3             # votes needed (the first sighting counts as one). Raise if false detections return
+COOLDOWN_MS = 2500            # ignore colors after successfully detected
+SPIN_360_MS = 900             # time to spin one full turn (TUNE THIS)
+
 
 class VEML6040:
     ADDR = 0x10
@@ -60,9 +70,11 @@ class VEML6040:
     # initializes color sensor to i2c bus
     def __init__(self, i2c):
         self.i2c = i2c
+        # Config register 0x00: SD=0 (on), auto mode, 40 ms integration
         self.i2c.writeto_mem(self.ADDR, 0x00, b"\x00\x00")
 
     def read(self):
+        """Returns [R, G, B, W] raw 16-bit values."""
         out = []
         for reg in (0x08, 0x09, 0x0A, 0x0B):
             d = self.i2c.readfrom_mem(self.ADDR, reg, 2)
@@ -93,9 +105,11 @@ class Motor:
 left_motor = Motor(*LEFT_MOTOR, invert=LEFT_INVERT)
 right_motor = Motor(*RIGHT_MOTOR, invert=RIGHT_INVERT)
 
+
 def drive(l, r):
     left_motor.set(l * LEFT_TRIM)
     right_motor.set(r * RIGHT_TRIM)
+
 
 def stop():
     drive(0, 0)
@@ -137,32 +151,49 @@ def servo_rest():
 
 servo_rest()                  # flag down at startup
 
-# connect to wifi
+# connect to wifi (ESP-NOW, talks directly to the station)
 sta = network.WLAN(network.STA_IF)
 sta.active(True)
+sta.disconnect()              # ESP-NOW only, no Wi-Fi network
 en = espnow.ESPNow()
 en.active(True)
 # for connecting to peers
-PEER = b"\xff\xff\xff\xff\xff\xff"   
-en.add_peer(PEER)
+en.add_peer(STATION_MAC)
+print("Robot MAC:", ":".join("%02x" % b for b in sta.config("mac")),
+      " -> station", ":".join("%02x" % b for b in STATION_MAC))
 seq = 0
 
 
+def ack_flash():
+    """Quick white flash + chirp so you can SEE the robot got the station's ACK."""
+    leds(40, 40, 40)
+    tone(2000, 60)
+    leds(0, 0, 0)
+
+
 def report(color_name):
+    """Send the detected color to the station and wait for its ACK. Returns True if acked.
+    Message:  'T1,RED,7'   Expected reply:  'ACK,T1,7'  (same sequence number)."""
     global seq
     seq += 1
     msg = "%s,%s,%d" % (TEAM, color_name, seq)
     want = "ACK,%s,%d" % (TEAM, seq)
-    for _ in range(3):
+
+    while en.any():           # throw away any old/late messages so they can't be mistaken for this ACK
+        en.recv(0)
+
+    for attempt in range(1, ACK_TRIES + 1):
         try:
-            en.send(PEER, msg)
+            delivered = en.send(STATION_MAC, msg)   # True = station's radio received the packet
+            print("Sent", msg, "(try %d, radio delivered: %s)" % (attempt, delivered))
         except OSError as e:
             print("send error", e)
         t0 = time.ticks_ms()
-        while time.ticks_diff(time.ticks_ms(), t0) < 300:
+        while time.ticks_diff(time.ticks_ms(), t0) < ACK_WAIT_MS:
             mac, data = en.recv(50)
-            if data and data.decode() == want:
+            if mac == STATION_MAC and data and data.decode() == want:
                 print("ACK received:", want)
+                ack_flash()
                 return True
     print("No ACK for", msg)
     return False
@@ -176,6 +207,7 @@ sens_r = VEML6040(i2c_r)
 
 white_l = [1, 1, 1, 1]
 white_r = [1, 1, 1, 1]
+
 
 # normalize colors based on env lighting
 def normalize(raw, white):
@@ -201,6 +233,7 @@ def calibrate_white():
     print("White L:", white_l, " R:", white_r)
 
 
+# ---------- color detection (same features as collect_samples.py) ----------
 COLOR_NAMES = ("RED", "GREEN", "BLUE")
 # data is pulled from CSV file, trained by collect_samples.py
 DATA_FILE = "training_data.csv"
@@ -210,6 +243,7 @@ MIN_BRIGHT = 0.05             # dark cutoff; overwritten from training_data.csv
 
 
 def chroma(r, g, b):
+    """Hue only: r, g, b as fractions of their sum (brightness removed). None if too dark."""
     s = r + g + b
     if s < MIN_BRIGHT:
         return None
@@ -217,15 +251,16 @@ def chroma(r, g, b):
 
 
 def saturation(c):
+    """0 = gray (white, black, gray edges); larger = more colorful."""
     if c is None:
         return 0.0
     return max(c) - min(c)
 
 
-SAT_THRESH = 0.12         
-COLOR_MAX_DIST = 0.10     
-COLOR_SET = []              
-NOT_COLOR_EXAMPLES = ("EDGE", "TURN") 
+SAT_THRESH = 0.12             # overwritten from training_data.csv
+COLOR_MAX_DIST = 0.10         # overwritten from training_data.csv
+COLOR_SET = []                # (label, cr, cg, cb): RED/GREEN/BLUE + colorful EDGE/TURN samples
+NOT_COLOR_EXAMPLES = ("EDGE", "TURN")   # kept only if colorful, so they outvote false colors
 
 
 def load_training():
@@ -246,7 +281,7 @@ def load_training():
         print("Loaded %d color samples, SAT_THRESH=%.3f, COLOR_MAX_DIST=%.3f, MIN_BRIGHT=%.3f"
               % (len(COLOR_SET), SAT_THRESH, COLOR_MAX_DIST, MIN_BRIGHT))
     except OSError:
-        print("No training_data.csv found - run collect_samples.py first!")
+        print("No %s found - run collect_samples.py first!" % DATA_FILE)
 
 
 load_training()
@@ -362,7 +397,6 @@ def run():
     time.sleep_ms(500)
 
     last_err = 0.0
-    last_dir = 1               # +1 line last seen on left, -1 on right
     cooldown_until = 0
     dbg_t = 0
     delay_buf = None           # remembers the front sensor's recent darkness values
@@ -400,7 +434,7 @@ def run():
             if name:
                 stop()
                 print("Detected", name)
-                report(name)              # tell the station BEFORE the maneuver
+                report(name)              # notify the station and wait for its ACK BEFORE the maneuver
                 MANEUVERS[name]()
                 drive(BASE_SPEED, BASE_SPEED)   # roll off the patch
                 time.sleep_ms(300)
@@ -456,8 +490,6 @@ def run():
             err = dl - dr            # >0: line toward left sensor -> steer left
             steer = KP * err + KD * (err - last_err)
             last_err = err
-            if abs(err) > 0.1:
-                last_dir = 1 if err > 0 else -1
             drive(BASE_SPEED - steer, BASE_SPEED + steer)
 
         time.sleep_ms(20)
