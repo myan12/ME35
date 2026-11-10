@@ -39,9 +39,6 @@ SEND_PERIOD_MS = 50
 
 # joystick class
 class Joystick:
-    """Class analog joystick on D36/D39. read() returns (x, y, pressed)
-    with x, y in -100..100 and pressed = 0/1."""
-
     def __init__(self):
         self.ax = ADC(Pin(JOY_X_PIN))
         self.ay = ADC(Pin(JOY_Y_PIN))

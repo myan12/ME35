@@ -38,7 +38,7 @@ FLAG_WAVES = 4
 FLAG_STEP_MS = 250
 
 # red tape detection (calibrated: floor ~0.44, red ~0.51)
-RED_FRACTION = 0.48
+RED_FRACTION = 0.44
 MIN_BRIGHTNESS = 200
 # how many red readings in a row before it counts as the finish line
 RED_HITS_NEEDED = 3
@@ -47,7 +47,7 @@ SENSE_PERIOD_MS = 50
 # stops motors if controller hasn't sent anything in this long
 FAILSAFE_MS = 500
 # prints sensor values with motors off, used for calibrating red
-CALIBRATE = False
+CALIBRATE = True
 
 
 # motor class
