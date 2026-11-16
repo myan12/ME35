@@ -13,8 +13,8 @@ from umqtt.simple import MQTTClient
 import secrets
 
 # wifi network the laptop/broker is on (must be 2.4 GHz, WPA2-personal)
-WIFI_SSID = "tufts_eecs"
-WIFI_PASSWORD = "foundedin1883"
+WIFI_SSID = secrets.SSID
+WIFI_PASSWORD = secrets.pwd
 
 # mqtt broker (laptop running mosquitto) - change this on demo day
 BROKER_IP = "10.5.10.52"
